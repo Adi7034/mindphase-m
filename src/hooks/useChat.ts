@@ -76,47 +76,12 @@ export function useChat() {
     const loadHistory = async () => {
       try {
         console.log('Loading chat history for user:', user.id);
-        
-        // Get latest conversation or load orphan messages
-        const { data: conversations, error: convError } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('user_id', user.id)
-          .order('updated_at', { ascending: false })
-          .limit(1);
 
-        if (convError) {
-          console.error('Error fetching conversations:', convError);
-          throw convError;
-        }
-
-        console.log('Found conversations:', conversations?.length || 0);
-
-        if (conversations && conversations.length > 0) {
-          setCurrentConversationId(conversations[0].id);
-          await loadConversationMessages(conversations[0].id);
-        } else {
-          // Load any orphan messages (messages without conversation_id)
-          const { data, error } = await supabase
-            .from('chat_messages')
-            .select('*')
-            .eq('user_id', user.id)
-            .is('conversation_id', null)
-            .order('created_at', { ascending: true })
-            .limit(50);
-
-          if (error) throw error;
-
-          if (data && data.length > 0) {
-            const loadedMessages: Message[] = data.map(m => ({
-              id: m.id,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              timestamp: new Date(m.created_at),
-            }));
-            setMessages([WELCOME_MESSAGE, ...loadedMessages]);
-          }
-        }
+        // Always start with a fresh chat - previous chats are accessible via history
+        // This ensures returning users get a clean slate while their old chats are preserved
+        setCurrentConversationId(null);
+        setMessages([WELCOME_MESSAGE]);
+        console.log('Starting fresh chat session for returning user');
         
         setHistoryLoaded(true);
       } catch (error) {
@@ -127,7 +92,7 @@ export function useChat() {
     };
 
     loadHistory();
-  }, [user, isAuthLoading, historyLoaded, loadConversationMessages]);
+  }, [user, isAuthLoading, historyLoaded]);
 
   const switchConversation = useCallback(async (conversationId: string | null) => {
     if (!user) return;

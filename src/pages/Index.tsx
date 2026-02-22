@@ -21,6 +21,8 @@ import logo from '@/assets/logo.ico';
 
 type ViewMode = 'chat' | 'tracker' | 'mood' | 'resources';
 
+const isFemale = (gender: string | null) => gender?.toLowerCase() === 'female';
+
 // Goodbye phrases to detect (supports multiple languages)
 const GOODBYE_PHRASES = [
   // English - simple thanks
@@ -42,7 +44,7 @@ const GOODBYE_PHRASES = [
 const Index = () => {
   const { t } = useTranslation();
   const { messages, isLoading, isLoadingHistory, sendMessage, editMessage, clearHistory, switchConversation, currentConversationId } = useChat();
-  const { user, isLoading: authLoading, signOut } = useAuth();
+  const { user, isLoading: authLoading, signOut, userGender } = useAuth();
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
@@ -168,15 +170,17 @@ const Index = () => {
           {/* Right side actions */}
           <div className="flex items-center gap-1">
             <LanguageSwitcher />
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setViewMode('tracker')}
-              className="gap-2"
-            >
-              <Calendar className="w-4 h-4" />
-              <span className="hidden sm:inline">{t('nav.cycleTracker')}</span>
-            </Button>
+            {isFemale(userGender) && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setViewMode('tracker')}
+                className="gap-2"
+              >
+                <Calendar className="w-4 h-4" />
+                <span className="hidden sm:inline">{t('nav.cycleTracker')}</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"

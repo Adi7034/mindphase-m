@@ -6,22 +6,38 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [userGender, setUserGender] = useState<string | null>(null);
+
+  const fetchUserGender = async (userId: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('gender')
+      .eq('user_id', userId)
+      .single();
+    setUserGender(data?.gender ?? null);
+  };
 
   useEffect(() => {
-    // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         setIsLoading(false);
+        if (session?.user) {
+          setTimeout(() => fetchUserGender(session.user.id), 0);
+        } else {
+          setUserGender(null);
+        }
       }
     );
 
-    // THEN check for existing session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
+      if (session?.user) {
+        fetchUserGender(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -55,5 +71,5 @@ export function useAuth() {
     return { error };
   };
 
-  return { user, session, isLoading, signUp, signIn, signOut, resetPassword };
+  return { user, session, isLoading, signUp, signIn, signOut, resetPassword, userGender };
 }

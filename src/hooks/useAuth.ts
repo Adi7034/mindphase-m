@@ -8,33 +8,35 @@ export function useAuth() {
   const [userGender, setUserGender] = useState<string | null>(null);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        // Fetch profile for gender
+    const fetchGender = async (userId: string) => {
+      try {
         const { data } = await supabase
           .from('profiles')
           .select('gender')
-          .eq('user_id', session.user.id)
+          .eq('user_id', userId)
           .maybeSingle();
         setUserGender(data?.gender ?? null);
+      } catch {
+        setUserGender(null);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+      if (session?.user) {
+        fetchGender(session.user.id);
       } else {
         setUserGender(null);
       }
-      setIsLoading(false);
     });
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('gender')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
-        setUserGender(data?.gender ?? null);
-      }
       setIsLoading(false);
+      if (session?.user) {
+        fetchGender(session.user.id);
+      }
     });
 
     return () => subscription.unsubscribe();

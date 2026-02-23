@@ -8,6 +8,8 @@ export function useAuth() {
   const [userGender, setUserGender] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchGender = async (userId: string) => {
       try {
         const { data } = await supabase
@@ -15,31 +17,45 @@ export function useAuth() {
           .select('gender')
           .eq('user_id', userId)
           .maybeSingle();
-        setUserGender(data?.gender ?? null);
+        if (isMounted) setUserGender(data?.gender ?? null);
       } catch {
-        setUserGender(null);
+        if (isMounted) setUserGender(null);
       }
     };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-      if (session?.user) {
-        fetchGender(session.user.id);
-      } else {
-        setUserGender(null);
+    // Listener for ONGOING auth changes — no await, no deadlock
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!isMounted) return;
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          setTimeout(() => fetchGender(session.user.id), 0);
+        } else {
+          setUserGender(null);
+        }
       }
-    });
+    );
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-      if (session?.user) {
-        fetchGender(session.user.id);
+    // INITIAL load — controls isLoading
+    const initializeAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!isMounted) return;
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          await fetchGender(session.user.id);
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
-    });
+    };
 
-    return () => subscription.unsubscribe();
+    initializeAuth();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string, gender: string) => {

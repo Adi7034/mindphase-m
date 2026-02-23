@@ -170,11 +170,45 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const { messages, userGender } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
+    }
+
+    // Check if non-female user is asking about period-related topics
+    const lastMessage = messages?.[messages.length - 1]?.content?.toLowerCase() || '';
+    const periodKeywords = [
+      'period', 'periods', 'menstrual', 'menstruation', 'cramps', 'pms',
+      'cycle', 'menses', 'bleeding', 'flow', 'tampon', 'pad', 'sanitary',
+      'period pain', 'period cramp', 'monthly cycle', 'ovulation',
+      'പീരിയഡ്', 'മാസമുറ', 'ആർത്തവം',
+      'पीरियड', 'मासिक', 'माहवारी', 'मासिक धर्म',
+    ];
+    
+    const isFemaleUser = userGender?.toLowerCase() === 'female';
+    const isPeriodQuery = periodKeywords.some(kw => lastMessage.includes(kw));
+    
+    if (!isFemaleUser && isPeriodQuery) {
+      // Return a polite apology as a streamed SSE response
+      const apologyMessages: Record<string, string> = {
+        ml: "ക്ഷമിക്കണം 💜 പീരിയഡ്സ് സംബന്ധമായ കാര്യങ്ങൾ ഞാൻ female users-ന് മാത്രമാണ് സഹായിക്കുന്നത്. പക്ഷേ മറ്റെന്തെങ്കിലും കാര്യത്തിൽ ഞാൻ സഹായിക്കാം! നിങ്ങളുടെ mental health, stress, sleep — എന്തിനെ കുറിച്ചും ചോദിക്കൂ 💜",
+        hi: "माफ़ करना 💜 periods से जुड़ी बातों में मैं सिर्फ़ female users की help करती हूँ। लेकिन और किसी भी चीज़ में मैं तुम्हारी help कर सकती हूँ! mental health, stress, sleep — कुछ भी पूछो 💜",
+        en: "I'm sorry 💜 I provide period-related support only for female users. But I'm here to help you with anything else! Mental health, stress, sleep, anxiety — feel free to ask me anything else and I'll be happy to help 💜",
+      };
+      
+      // Detect language from the message
+      const hasMalayalam = /[\u0D00-\u0D7F]/.test(lastMessage);
+      const hasHindi = /[\u0900-\u097F]/.test(lastMessage);
+      const lang = hasMalayalam ? 'ml' : hasHindi ? 'hi' : 'en';
+      const apology = apologyMessages[lang];
+      
+      // Format as SSE
+      const sseData = `data: ${JSON.stringify({ choices: [{ delta: { content: apology } }] })}\n\ndata: [DONE]\n\n`;
+      return new Response(sseData, {
+        headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+      });
     }
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

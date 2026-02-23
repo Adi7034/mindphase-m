@@ -20,7 +20,7 @@ const WELCOME_MESSAGE: Message = {
 };
 
 export function useChat() {
-  const { user, isLoading: isAuthLoading } = useAuth();
+  const { user, isLoading: isAuthLoading, userGender } = useAuth();
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
@@ -236,7 +236,7 @@ export function useChat() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages }),
+        body: JSON.stringify({ messages: chatMessages, userGender }),
       });
 
       if (!resp.ok) {
@@ -398,7 +398,7 @@ export function useChat() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         },
-        body: JSON.stringify({ messages: chatMessages }),
+        body: JSON.stringify({ messages: chatMessages, userGender }),
       });
 
       if (!resp.ok) {

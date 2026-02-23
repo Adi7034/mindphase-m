@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Lock, ArrowRight, User, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, User, Eye, EyeOff, Mail } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,7 +9,6 @@ import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useTranslation } from '@/hooks/useTranslation';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
-import { localAuth } from '@/lib/localDb';
 import { z } from 'zod';
 import logo from '@/assets/logo.ico';
 import {
@@ -23,27 +22,51 @@ import {
 const Auth = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { signIn, signUp } = useAuth();
-  const [hasAccount, setHasAccount] = useState<boolean | null>(null);
+  const { signIn, signUp, user, isLoading: authLoading, resetPassword } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
-  const [pin, setPin] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [gender, setGender] = useState<string>('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
 
-  // Check if account exists on mount
   useEffect(() => {
-    localAuth.getUser().then(user => {
-      setHasAccount(!!user);
-      setIsLogin(!!user); // If account exists, default to login
-    });
-  }, []);
+    if (!authLoading && user) {
+      navigate('/');
+    }
+  }, [user, authLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const pinSchema = z.string().min(4, 'PIN must be at least 4 characters');
-    const validation = pinSchema.safeParse(pin);
+    if (isForgotPassword) {
+      const emailSchema = z.string().email('Please enter a valid email');
+      const validation = emailSchema.safeParse(email);
+      if (!validation.success) {
+        toast.error(validation.error.errors[0].message);
+        return;
+      }
+      setIsSubmitting(true);
+      try {
+        const { error } = await resetPassword(email);
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
+        toast.success('Password reset email sent! Check your inbox.');
+        setIsForgotPassword(false);
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    const schema = z.object({
+      email: z.string().email('Please enter a valid email'),
+      password: z.string().min(6, 'Password must be at least 6 characters'),
+    });
+    const validation = schema.safeParse({ email, password });
     if (!validation.success) {
       toast.error(validation.error.errors[0].message);
       return;
@@ -58,7 +81,7 @@ const Auth = () => {
 
     try {
       if (isLogin) {
-        const { error } = await signIn(pin);
+        const { error } = await signIn(email, password);
         if (error) {
           toast.error(error.message);
           return;
@@ -66,20 +89,19 @@ const Auth = () => {
         toast.success(t('auth.welcomeBack'));
         navigate('/');
       } else {
-        const { error } = await signUp(pin, gender);
+        const { error } = await signUp(email, password, gender);
         if (error) {
           toast.error(error.message);
           return;
         }
-        toast.success(t('auth.accountCreated'));
-        navigate('/');
+        toast.success('Account created! Please check your email to verify.');
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  if (hasAccount === null) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-rose-50 via-background to-purple-50 flex items-center justify-center">
         <img src={logo} alt="MindPhase-M Logo" className="w-10 h-10 rounded-full shadow-lg animate-pulse" />
@@ -101,60 +123,87 @@ const Auth = () => {
           <img src={logo} alt="MindPhase-M Logo" className="w-16 h-16 mx-auto mb-4 rounded-full shadow-lg" />
           <h1 className="text-2xl font-bold text-foreground">{t('app.name')}</h1>
           <p className="text-muted-foreground">{t('app.tagline')}</p>
-          <p className="text-xs text-muted-foreground mt-2">🔒 All data stored locally on your device</p>
         </div>
 
         <div className="bg-card border border-border rounded-2xl p-6 shadow-lg">
-          {hasAccount ? (
-            // Login only — account exists
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="pin">Enter your PIN</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="pin"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    className="pl-10 pr-10"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <Button type="submit" className="w-full gap-2" disabled={isSubmitting}>
-                {isSubmitting ? t('auth.pleaseWait') : (
-                  <>{t('auth.signIn')}<ArrowRight className="w-4 h-4" /></>
-                )}
-              </Button>
-            </form>
-          ) : (
-            // Create account — no account exists
+          {isForgotPassword ? (
             <form onSubmit={handleSubmit} className="space-y-4">
               <p className="text-sm text-muted-foreground text-center mb-2">
-                Create a local PIN to protect your data
+                Enter your email to receive a password reset link
               </p>
-              
               <div className="space-y-2">
-                <Label htmlFor="pin">Choose a PIN (min 4 characters)</Label>
+                <Label htmlFor="email">Email</Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
-                    id="pin"
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10"
+                    required
+                  />
+                </div>
+              </div>
+              <Button type="submit" className="w-full gap-2" disabled={isSubmitting}>
+                {isSubmitting ? t('auth.pleaseWait') : 'Send Reset Link'}
+              </Button>
+              <button
+                type="button"
+                onClick={() => setIsForgotPassword(false)}
+                className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Back to sign in
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex gap-2 mb-4">
+                <Button
+                  type="button"
+                  variant={isLogin ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setIsLogin(true)}
+                >
+                  Sign In
+                </Button>
+                <Button
+                  type="button"
+                  variant={!isLogin ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setIsLogin(false)}
+                >
+                  Sign Up
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="••••"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value)}
-                    className="pl-10 pr-10"
+                    placeholder="••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pr-10"
                     required
                   />
                   <button
@@ -167,29 +216,41 @@ const Auth = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="gender">{t('auth.gender') || 'Gender'}</Label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
-                  <Select value={gender} onValueChange={setGender}>
-                    <SelectTrigger className="pl-10">
-                      <SelectValue placeholder={t('auth.selectGender') || 'Select your gender'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="female">{t('auth.female') || 'Female'}</SelectItem>
-                      <SelectItem value="male">{t('auth.male') || 'Male'}</SelectItem>
-                      <SelectItem value="other">{t('auth.other') || 'Other'}</SelectItem>
-                      <SelectItem value="prefer_not_to_say">{t('auth.preferNotToSay') || 'Prefer not to say'}</SelectItem>
-                    </SelectContent>
-                  </Select>
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="gender">{t('auth.gender') || 'Gender'}</Label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
+                    <Select value={gender} onValueChange={setGender}>
+                      <SelectTrigger className="pl-10">
+                        <SelectValue placeholder={t('auth.selectGender') || 'Select your gender'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="female">{t('auth.female') || 'Female'}</SelectItem>
+                        <SelectItem value="male">{t('auth.male') || 'Male'}</SelectItem>
+                        <SelectItem value="other">{t('auth.other') || 'Other'}</SelectItem>
+                        <SelectItem value="prefer_not_to_say">{t('auth.preferNotToSay') || 'Prefer not to say'}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <Button type="submit" className="w-full gap-2" disabled={isSubmitting}>
                 {isSubmitting ? t('auth.pleaseWait') : (
-                  <>{t('auth.createAccount') || 'Create Account'}<ArrowRight className="w-4 h-4" /></>
+                  <>{isLogin ? t('auth.signIn') : (t('auth.createAccount') || 'Create Account')}<ArrowRight className="w-4 h-4" /></>
                 )}
               </Button>
+
+              {isLogin && (
+                <button
+                  type="button"
+                  onClick={() => setIsForgotPassword(true)}
+                  className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Forgot password?
+                </button>
+              )}
             </form>
           )}
         </div>

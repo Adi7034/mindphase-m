@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, Hand, Ear, Heart, Sparkles, ArrowRight, RotateCcw } from 'lucide-react';
+import { Eye, Hand, Ear, Heart, Sparkles, ArrowRight, RotateCcw, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useTranslation } from '@/hooks/useTranslation';
 
 const STEPS = [
@@ -16,13 +17,32 @@ export function GroundingExercise() {
   const { t } = useTranslation();
   const [currentStep, setCurrentStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [items, setItems] = useState<string[][]>(STEPS.map(() => []));
+  const [inputValue, setInputValue] = useState('');
 
   const step = STEPS[currentStep];
   const Icon = step?.icon;
+  const currentItems = items[currentStep] || [];
+  const isFilled = currentItems.length >= step?.count;
+
+  const addItem = () => {
+    if (!inputValue.trim() || isFilled) return;
+    const updated = [...items];
+    updated[currentStep] = [...currentItems, inputValue.trim()];
+    setItems(updated);
+    setInputValue('');
+  };
+
+  const removeItem = (index: number) => {
+    const updated = [...items];
+    updated[currentStep] = currentItems.filter((_, i) => i !== index);
+    setItems(updated);
+  };
 
   const handleNext = () => {
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
+      setInputValue('');
     } else {
       setIsComplete(true);
     }
@@ -31,6 +51,8 @@ export function GroundingExercise() {
   const reset = () => {
     setCurrentStep(0);
     setIsComplete(false);
+    setItems(STEPS.map(() => []));
+    setInputValue('');
   };
 
   return (
@@ -69,12 +91,54 @@ export function GroundingExercise() {
               <Icon className="w-8 h-8" />
             </motion.div>
 
-            <p className="text-2xl font-bold text-foreground mb-2">{step.count}</p>
-            <p className="text-center text-muted-foreground mb-6">
+            <p className="text-2xl font-bold text-foreground mb-1">{step.count}</p>
+            <p className="text-center text-muted-foreground mb-4">
               {t(`exercise.grounding.${step.sense}` as any)}
             </p>
 
-            <Button onClick={handleNext} className="gap-2">
+            {/* Items list */}
+            <div className="w-full max-w-xs space-y-2 mb-4">
+              {currentItems.map((item, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-1.5 text-sm"
+                >
+                  <span className="w-5 h-5 rounded-full bg-primary/20 text-primary text-xs flex items-center justify-center font-bold flex-shrink-0">
+                    {i + 1}
+                  </span>
+                  <span className="flex-1 text-foreground truncate">{item}</span>
+                  <button onClick={() => removeItem(i)} className="text-muted-foreground hover:text-destructive transition-colors">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </motion.div>
+              ))}
+
+              {/* Input for adding items */}
+              {!isFilled && (
+                <div className="flex gap-2">
+                  <Input
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addItem()}
+                    placeholder={`${currentItems.length + 1} / ${step.count}`}
+                    className="text-sm h-9"
+                    autoFocus
+                  />
+                  <Button size="sm" variant="outline" onClick={addItem} disabled={!inputValue.trim()} className="h-9 px-2">
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Counter */}
+            <p className="text-xs text-muted-foreground mb-3">
+              {currentItems.length} / {step.count}
+            </p>
+
+            <Button onClick={handleNext} className="gap-2" disabled={!isFilled}>
               {currentStep < STEPS.length - 1 ? (
                 <>
                   {t('exercise.next')} <ArrowRight className="w-4 h-4" />

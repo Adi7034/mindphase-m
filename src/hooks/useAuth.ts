@@ -1,75 +1,65 @@
-import { useState, useEffect } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { useState, useEffect, useCallback } from 'react';
+import { localAuth, LocalUser } from '@/lib/localDb';
 
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userGender, setUserGender] = useState<string | null>(null);
 
-  const fetchUserGender = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('gender')
-      .eq('user_id', userId)
-      .single();
-    setUserGender(data?.gender ?? null);
-  };
-
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setIsLoading(false);
-        if (session?.user) {
-          setTimeout(() => fetchUserGender(session.user.id), 0);
-        } else {
-          setUserGender(null);
+    const loadUser = async () => {
+      try {
+        if (localAuth.isLoggedIn()) {
+          const u = await localAuth.getUser();
+          setUser(u);
+          setUserGender(u?.gender ?? null);
         }
+      } catch (e) {
+        console.error('Error loading local user:', e);
+      } finally {
+        setIsLoading(false);
       }
-    );
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setIsLoading(false);
-      if (session?.user) {
-        fetchUserGender(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    };
+    loadUser();
   }, []);
 
-  const signUp = async (email: string, password: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: redirectUrl }
-    });
-    return { data, error };
-  };
+  const signUp = useCallback(async (pin: string, gender: string, displayName?: string) => {
+    try {
+      const u = await localAuth.signUp(pin, gender, displayName);
+      setUser(u);
+      setUserGender(u.gender);
+      return { data: u, error: null };
+    } catch (error: any) {
+      return { data: null, error: { message: error.message } };
+    }
+  }, []);
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error };
-  };
+  const signIn = useCallback(async (pin: string) => {
+    try {
+      const u = await localAuth.signIn(pin);
+      setUser(u);
+      setUserGender(u.gender);
+      return { error: null };
+    } catch (error: any) {
+      return { error: { message: error.message } };
+    }
+  }, []);
 
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error };
-  };
+  const signOut = useCallback(async () => {
+    localAuth.signOut();
+    setUser(null);
+    setUserGender(null);
+    return { error: null };
+  }, []);
 
-  const resetPassword = async (email: string) => {
-    const redirectUrl = `${window.location.origin}/reset-password`;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl
-    });
-    return { error };
-  };
+  const resetPin = useCallback(async (newPin: string) => {
+    try {
+      await localAuth.resetPin(newPin);
+      return { error: null };
+    } catch (error: any) {
+      return { error: { message: error.message } };
+    }
+  }, []);
 
-  return { user, session, isLoading, signUp, signIn, signOut, resetPassword, userGender };
+  return { user, session: user, isLoading, signUp, signIn, signOut, resetPin, userGender };
 }

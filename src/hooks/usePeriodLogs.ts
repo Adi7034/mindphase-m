@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { localDb } from '@/lib/localDb';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
 
@@ -18,64 +18,47 @@ export function usePeriodLogs() {
   const [logs, setLogs] = useState<PeriodLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(() => {
+    if (!user) return;
     try {
-      const { data, error } = await supabase
-        .from('period_logs')
-        .select('*')
-        .order('log_date', { ascending: false });
-
-      if (error) throw error;
-      setLogs((data || []) as PeriodLog[]);
+      const data = localDb.select('period_logs', { user_id: user.id } as any)
+        .sort((a: any, b: any) => new Date(b.log_date).getTime() - new Date(a.log_date).getTime());
+      setLogs(data as PeriodLog[]);
     } catch (error) {
       console.error('Error fetching logs:', error);
       toast.error('Failed to load period logs');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (user) {
-      fetchLogs();
-    }
+    if (user) fetchLogs();
   }, [fetchLogs, user]);
 
-  const saveLog = useCallback(async (log: Omit<PeriodLog, 'id'>) => {
+  const saveLog = useCallback((log: Omit<PeriodLog, 'id'>) => {
     if (!user) {
       toast.error('Please sign in first');
       return null;
     }
-    
     try {
-      const { data, error } = await supabase
-        .from('period_logs')
-        .upsert(
-          { 
-            log_date: log.log_date,
-            flow_intensity: log.flow_intensity,
-            symptoms: log.symptoms,
-            moods: log.moods,
-            notes: log.notes,
-            user_id: user.id
-          },
-          { onConflict: 'log_date,user_id', ignoreDuplicates: false }
-        )
-        .select()
-        .single();
+      const saved = localDb.upsert('period_logs', {
+        log_date: log.log_date,
+        flow_intensity: log.flow_intensity,
+        symptoms: log.symptoms || [],
+        moods: log.moods || [],
+        notes: log.notes,
+        user_id: user.id,
+      }, ['log_date', 'user_id']);
 
-      if (error) throw error;
-      
-      const typedData = data as PeriodLog;
       setLogs(prev => {
         const filtered = prev.filter(l => l.log_date !== log.log_date);
-        return [typedData, ...filtered].sort((a, b) => 
+        return [saved as PeriodLog, ...filtered].sort((a, b) =>
           new Date(b.log_date).getTime() - new Date(a.log_date).getTime()
         );
       });
-      
       toast.success('Log saved! 💜');
-      return data;
+      return saved;
     } catch (error) {
       console.error('Error saving log:', error);
       toast.error('Failed to save log');
@@ -83,22 +66,19 @@ export function usePeriodLogs() {
     }
   }, [user]);
 
-  const deleteLog = useCallback(async (date: string) => {
+  const deleteLog = useCallback((date: string) => {
     try {
-      const { error } = await supabase
-        .from('period_logs')
-        .delete()
-        .eq('log_date', date);
-
-      if (error) throw error;
-      
+      // Filter out the log with matching date and user
+      const all = localDb.select('period_logs', { user_id: user?.id } as any);
+      const remaining = all.filter((l: any) => l.log_date !== date);
+      localStorage.setItem('mindphase_period_logs', JSON.stringify(remaining));
       setLogs(prev => prev.filter(l => l.log_date !== date));
       toast.success('Log deleted');
     } catch (error) {
       console.error('Error deleting log:', error);
       toast.error('Failed to delete log');
     }
-  }, []);
+  }, [user]);
 
   const getLogByDate = useCallback((date: string) => {
     return logs.find(l => l.log_date === date);

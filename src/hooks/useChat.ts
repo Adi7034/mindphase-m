@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import { localDb } from '@/lib/localDb';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 
 export interface Message {
@@ -27,13 +27,21 @@ export function useChat() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
 
-  const loadConversationMessages = useCallback((conversationId: string) => {
-    const data = localDb.select('chat_messages', { conversation_id: conversationId } as any)
-      .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .slice(0, 50);
+  const loadConversationMessages = useCallback(async (conversationId: string) => {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(50);
 
-    if (data.length > 0) {
-      const loadedMessages: Message[] = data.map((m: any) => ({
+    if (error) {
+      console.error('Error loading messages:', error);
+      return;
+    }
+
+    if (data && data.length > 0) {
+      const loadedMessages: Message[] = data.map((m) => ({
         id: m.id,
         role: m.role as 'user' | 'assistant',
         content: m.content,
@@ -58,7 +66,7 @@ export function useChat() {
     setIsLoadingHistory(false);
   }, [user, historyLoaded]);
 
-  const switchConversation = useCallback((conversationId: string | null) => {
+  const switchConversation = useCallback(async (conversationId: string | null) => {
     if (!user) return;
     setIsLoadingHistory(true);
     if (conversationId === null) {
@@ -66,43 +74,64 @@ export function useChat() {
       setMessages([WELCOME_MESSAGE]);
     } else {
       setCurrentConversationId(conversationId);
-      loadConversationMessages(conversationId);
+      await loadConversationMessages(conversationId);
     }
     setIsLoadingHistory(false);
   }, [user, loadConversationMessages]);
 
-  const ensureConversation = useCallback((firstMessage: string): string | null => {
+  const ensureConversation = useCallback(async (firstMessage: string): Promise<string | null> => {
     if (!user) return null;
     if (currentConversationId) return currentConversationId;
 
     const title = firstMessage.slice(0, 50) + (firstMessage.length > 50 ? '...' : '');
-    const conv = localDb.insert('conversations', { user_id: user.id, title }) as any;
-    setCurrentConversationId(conv.id);
-    return conv.id;
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert({ user_id: user.id, title })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating conversation:', error);
+      return null;
+    }
+    setCurrentConversationId(data.id);
+    return data.id;
   }, [user, currentConversationId]);
 
-  const saveMessage = useCallback((role: 'user' | 'assistant', content: string, conversationId: string | null) => {
+  const saveMessage = useCallback(async (role: 'user' | 'assistant', content: string, conversationId: string | null) => {
     if (!user) return null;
-    const msg = localDb.insert('chat_messages', {
-      user_id: user.id,
-      role,
-      content,
-      conversation_id: conversationId,
-    }) as any;
-    if (conversationId) {
-      localDb.update('conversations', { id: conversationId } as any, { updated_at: new Date().toISOString() } as any);
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({
+        user_id: user.id,
+        role,
+        content,
+        conversation_id: conversationId,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error saving message:', error);
+      return null;
     }
-    return msg;
+    if (conversationId) {
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+    }
+    return data;
   }, [user]);
 
-  const deleteMessage = useCallback((messageId: string) => {
+  const deleteMessage = useCallback(async (messageId: string) => {
     setMessages(prev => prev.filter(m => m.id !== messageId));
     if (!messageId.startsWith('user-') && !messageId.startsWith('assistant-') && messageId !== 'welcome') {
-      localDb.delete('chat_messages', { id: messageId } as any);
+      await supabase.from('chat_messages').delete().eq('id', messageId);
     }
   }, []);
 
-  // SSE streaming helper (shared between send & edit)
+  // SSE streaming helper
   const streamResponse = useCallback(async (
     chatMessages: { role: string; content: string }[],
     assistantId: string,
@@ -153,7 +182,6 @@ export function useChat() {
       }
     }
 
-    // Final flush
     if (buffer.trim()) {
       for (let raw of buffer.split('\n')) {
         if (!raw) continue;
@@ -186,8 +214,8 @@ export function useChat() {
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    const conversationId = ensureConversation(input.trim());
-    const savedUserMsg = saveMessage('user', input.trim(), conversationId);
+    const conversationId = await ensureConversation(input.trim());
+    const savedUserMsg = await saveMessage('user', input.trim(), conversationId);
     if (savedUserMsg) userMessage.id = savedUserMsg.id;
 
     let assistantContent = '';
@@ -214,10 +242,8 @@ export function useChat() {
         updateAssistant(chunk);
       });
 
-      // streamResponse accumulates, but updateAssistant also accumulates. Reset:
-      // Actually assistantContent is set by streamResponse return. Save it.
       if (assistantContent) {
-        const savedAssistantMsg = saveMessage('assistant', assistantContent, conversationId);
+        const savedAssistantMsg = await saveMessage('assistant', assistantContent, conversationId);
         if (savedAssistantMsg) {
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, id: savedAssistantMsg.id } : m));
         }
@@ -243,17 +269,17 @@ export function useChat() {
     );
     setMessages(updatedMessages);
 
-    // Delete subsequent messages from local storage
+    // Delete subsequent messages from Supabase
     const idsToDelete = messagesToDelete
       .filter(m => !m.id.startsWith('user-') && !m.id.startsWith('assistant-') && m.id !== 'welcome')
       .map(m => m.id);
     if (idsToDelete.length > 0) {
-      localDb.deleteByIds('chat_messages', idsToDelete);
+      await supabase.from('chat_messages').delete().in('id', idsToDelete);
     }
 
-    // Update edited message in local storage
+    // Update edited message in Supabase
     if (!messageId.startsWith('user-') && !messageId.startsWith('assistant-') && messageId !== 'welcome') {
-      localDb.update('chat_messages', { id: messageId } as any, { content: newContent } as any);
+      await supabase.from('chat_messages').update({ content: newContent }).eq('id', messageId);
     }
 
     setIsLoading(true);
@@ -282,7 +308,7 @@ export function useChat() {
       });
 
       if (assistantContent) {
-        const savedAssistantMsg = saveMessage('assistant', assistantContent, currentConversationId);
+        const savedAssistantMsg = await saveMessage('assistant', assistantContent, currentConversationId);
         if (savedAssistantMsg) {
           setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, id: savedAssistantMsg.id } : m));
         }
@@ -296,17 +322,14 @@ export function useChat() {
     }
   }, [user, messages, isLoading, saveMessage, currentConversationId, streamResponse]);
 
-  const clearHistory = useCallback(() => {
+  const clearHistory = useCallback(async () => {
     if (!user) return;
 
     if (currentConversationId) {
-      localDb.delete('conversations', { id: currentConversationId } as any);
-      localDb.delete('chat_messages', { conversation_id: currentConversationId } as any);
+      await supabase.from('chat_messages').delete().eq('conversation_id', currentConversationId);
+      await supabase.from('conversations').delete().eq('id', currentConversationId);
     } else {
-      // Delete orphan messages
-      const orphans = localDb.select('chat_messages', { user_id: user.id } as any)
-        .filter((m: any) => !m.conversation_id);
-      orphans.forEach((m: any) => localDb.delete('chat_messages', { id: m.id } as any));
+      await supabase.from('chat_messages').delete().eq('user_id', user.id).is('conversation_id', null);
     }
 
     setCurrentConversationId(null);

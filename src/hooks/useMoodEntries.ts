@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { localDb } from '@/lib/localDb';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
 import { toast } from 'sonner';
 
@@ -18,13 +18,18 @@ export function useMoodEntries() {
   const [entries, setEntries] = useState<MoodEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchEntries = useCallback(() => {
+  const fetchEntries = useCallback(async () => {
     if (!user) return;
     setIsLoading(true);
     try {
-      const data = localDb.select('mood_entries', { user_id: user.id } as any)
-        .sort((a: any, b: any) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime());
-      setEntries(data as any);
+      const { data, error } = await supabase
+        .from('mood_entries')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('entry_date', { ascending: false });
+
+      if (error) throw error;
+      setEntries(data || []);
     } catch (error) {
       console.error('Error fetching mood entries:', error);
       toast.error('Failed to load mood entries');
@@ -37,18 +42,22 @@ export function useMoodEntries() {
     fetchEntries();
   }, [fetchEntries]);
 
-  const saveEntry = useCallback((entry: MoodEntry) => {
+  const saveEntry = useCallback(async (entry: MoodEntry) => {
     if (!user) return;
     try {
-      localDb.upsert('mood_entries', {
-        user_id: user.id,
-        entry_date: entry.entry_date,
-        mood_score: entry.mood_score,
-        mood_label: entry.mood_label,
-        notes: entry.notes || null,
-        energy_level: entry.energy_level || null,
-        sleep_quality: entry.sleep_quality || null,
-      }, ['user_id', 'entry_date']);
+      const { error } = await supabase
+        .from('mood_entries')
+        .upsert({
+          user_id: user.id,
+          entry_date: entry.entry_date,
+          mood_score: entry.mood_score,
+          mood_label: entry.mood_label,
+          notes: entry.notes || null,
+          energy_level: entry.energy_level || null,
+          sleep_quality: entry.sleep_quality || null,
+        }, { onConflict: 'user_id,entry_date' });
+
+      if (error) throw error;
       fetchEntries();
       toast.success('Mood entry saved! 💜');
     } catch (error) {
@@ -57,13 +66,16 @@ export function useMoodEntries() {
     }
   }, [user, fetchEntries]);
 
-  const deleteEntry = useCallback((entryDate: string) => {
+  const deleteEntry = useCallback(async (entryDate: string) => {
     if (!user) return;
     try {
-      const all = localDb.select('mood_entries', { user_id: user.id } as any);
-      const toKeep = all.filter((e: any) => e.entry_date !== entryDate);
-      // Rewrite table with filtered data
-      localStorage.setItem('mindphase_mood_entries', JSON.stringify(toKeep));
+      const { error } = await supabase
+        .from('mood_entries')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('entry_date', entryDate);
+
+      if (error) throw error;
       fetchEntries();
       toast.success('Entry deleted');
     } catch (error) {

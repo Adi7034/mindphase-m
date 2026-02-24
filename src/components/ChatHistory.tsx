@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, Trash2, X, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { localDb } from '@/lib/localDb';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useTranslation } from '@/hooks/useTranslation';
 import { format } from 'date-fns';
@@ -35,13 +35,18 @@ export function ChatHistory({ open, onClose, onSelectConversation, currentConver
     }
   }, [open, user]);
 
-  const loadConversations = () => {
+  const loadConversations = async () => {
     if (!user) return;
     setIsLoading(true);
     try {
-      const data = localDb.select('conversations', { user_id: user.id } as any)
-        .sort((a: any, b: any) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-      setConversations(data as Conversation[]);
+      const { data, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false });
+
+      if (error) throw error;
+      setConversations(data || []);
     } catch (error) {
       console.error('Error loading conversations:', error);
     } finally {
@@ -59,11 +64,11 @@ export function ChatHistory({ open, onClose, onSelectConversation, currentConver
     onClose();
   };
 
-  const handleDeleteConversation = (id: string, e: React.MouseEvent) => {
+  const handleDeleteConversation = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      localDb.delete('conversations', { id } as any);
-      localDb.delete('chat_messages', { conversation_id: id } as any);
+      await supabase.from('chat_messages').delete().eq('conversation_id', id);
+      await supabase.from('conversations').delete().eq('id', id);
       setConversations(prev => prev.filter(c => c.id !== id));
       if (currentConversationId === id) {
         onSelectConversation(null);

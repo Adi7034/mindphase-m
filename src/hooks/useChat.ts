@@ -143,7 +143,7 @@ export function useChat() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
       },
-      body: JSON.stringify({ messages: chatMessages, userGender }),
+      body: JSON.stringify({ messages: chatMessages, userGender, uiLanguage: (typeof localStorage !== 'undefined' ? localStorage.getItem('mindphase-language') : null) || 'en' }),
     });
 
     if (!resp.ok) {

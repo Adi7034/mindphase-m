@@ -170,7 +170,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, userGender } = await req.json();
+    const { messages, userGender, uiLanguage } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
@@ -211,6 +211,29 @@ serve(async (req) => {
       });
     }
 
+    // Detect language from latest user message (script-based)
+    const lastUserMsg = [...(messages || [])].reverse().find((m: any) => m.role === 'user')?.content || '';
+    const hasMalayalamScript = /[\u0D00-\u0D7F]/.test(lastUserMsg);
+    const hasHindiScript = /[\u0900-\u097F]/.test(lastUserMsg);
+    // Romanized hint detection (very lightweight)
+    const lower = lastUserMsg.toLowerCase();
+    const hindiRomanHints = /\b(kya|kaise|kyun|nahi|nahin|mujhe|tum|aap|hai|hain|kar|raha|rahi|accha|theek|dost|bahut|thoda|kuch|matlab|samajh|pyaar|dard|neend|aaj|kal)\b/;
+    const malayalamRomanHints = /\b(ente|ninte|enthu|enthaa|aanu|undu|illa|cheyyam|venam|chetta|chechi|mone|mole|sugamano|ariyilla|ishtam|veedu|vaa|poyi)\b/;
+
+    let detectedLang: 'ml' | 'hi' | 'en' = 'en';
+    if (hasMalayalamScript) detectedLang = 'ml';
+    else if (hasHindiScript) detectedLang = 'hi';
+    else if (malayalamRomanHints.test(lower)) detectedLang = 'ml';
+    else if (hindiRomanHints.test(lower)) detectedLang = 'hi';
+    else if (uiLanguage === 'ml' || uiLanguage === 'hi') detectedLang = uiLanguage;
+
+    const langName = detectedLang === 'ml' ? 'Malayalam' : detectedLang === 'hi' ? 'Hindi' : 'English';
+    const langDirective = `LANGUAGE LOCK: The user's message is in ${langName}. You MUST reply ONLY in ${langName}. Do NOT mix languages. ${
+      detectedLang === 'ml' ? 'Use Malayalam script (മലയാളം) for the reply.' :
+      detectedLang === 'hi' ? 'Use Devanagari script (हिंदी) for the reply.' :
+      'Use natural English.'
+    } Match the user's tone and script exactly.`;
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -221,6 +244,7 @@ serve(async (req) => {
         model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: langDirective },
           ...messages,
         ],
         stream: true,

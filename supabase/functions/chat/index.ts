@@ -211,21 +211,26 @@ serve(async (req) => {
       });
     }
 
-    // Detect language from latest user message (script-based)
+    // Detect language from latest user message — script wins; otherwise default to English.
+    // Romanized detection is intentionally STRICT (needs 2+ strong hints) to avoid false positives on plain English.
     const lastUserMsg = [...(messages || [])].reverse().find((m: any) => m.role === 'user')?.content || '';
     const hasMalayalamScript = /[\u0D00-\u0D7F]/.test(lastUserMsg);
     const hasHindiScript = /[\u0900-\u097F]/.test(lastUserMsg);
-    // Romanized hint detection (very lightweight)
     const lower = lastUserMsg.toLowerCase();
-    const hindiRomanHints = /\b(kya|kaise|kyun|nahi|nahin|mujhe|tum|aap|hai|hain|kar|raha|rahi|accha|theek|dost|bahut|thoda|kuch|matlab|samajh|pyaar|dard|neend|aaj|kal)\b/;
-    const malayalamRomanHints = /\b(ente|ninte|enthu|enthaa|aanu|undu|illa|cheyyam|venam|chetta|chechi|mone|mole|sugamano|ariyilla|ishtam|veedu|vaa|poyi)\b/;
+
+    const hindiRomanRegex = /\b(kya|kaise|kyun|nahi|nahin|mujhe|tumhe|aap|hain|raha|rahi|rahe|accha|theek|bahut|thoda|kuch|matlab|samajh|pyaar|dard|neend|aaj|kal|mera|meri|tera|teri|hum|humko|kyon|jaldi|abhi)\b/g;
+    const malayalamRomanRegex = /\b(ente|ninte|enthu|enthaa|aanu|undu|illa|cheyyam|venam|chetta|chechi|mone|mole|sugamano|ariyilla|ishtam|veedu|poyi|cheythu|parayam|ariyam|kandu|kettu|vannu|pokam)\b/g;
+
+    const hindiHits = (lower.match(hindiRomanRegex) || []).length;
+    const malayalamHits = (lower.match(malayalamRomanRegex) || []).length;
 
     let detectedLang: 'ml' | 'hi' | 'en' = 'en';
     if (hasMalayalamScript) detectedLang = 'ml';
     else if (hasHindiScript) detectedLang = 'hi';
-    else if (malayalamRomanHints.test(lower)) detectedLang = 'ml';
-    else if (hindiRomanHints.test(lower)) detectedLang = 'hi';
-    else if (uiLanguage === 'ml' || uiLanguage === 'hi') detectedLang = uiLanguage;
+    else if (malayalamHits >= 2) detectedLang = 'ml';
+    else if (hindiHits >= 2) detectedLang = 'hi';
+    // NOTE: We deliberately do NOT fall back to uiLanguage. The user's actual message language wins.
+    // If the message is plain English, reply in English even if the UI is set to Hindi/Malayalam.
 
     const langName = detectedLang === 'ml' ? 'Malayalam' : detectedLang === 'hi' ? 'Hindi' : 'English';
     const langDirective = `LANGUAGE LOCK: The user's message is in ${langName}. You MUST reply ONLY in ${langName}. Do NOT mix languages. ${

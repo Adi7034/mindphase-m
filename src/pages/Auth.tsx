@@ -273,6 +273,14 @@ const Auth = () => {
                   Forgot password?
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={handleClearSession}
+                className="w-full text-xs text-muted-foreground/70 hover:text-foreground transition-colors"
+              >
+                Having trouble signing in? Clear session & retry
+              </button>
             </form>
           )}
         </div>

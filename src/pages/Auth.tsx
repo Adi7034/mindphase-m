@@ -83,7 +83,11 @@ const Auth = () => {
       if (isLogin) {
         const { error } = await signIn(email, password);
         if (error) {
-          toast.error(error.message);
+          if (error.message?.toLowerCase().includes('invalid login')) {
+            toast.error('Incorrect email or password. If you forgot it, use "Forgot password?" below.');
+          } else {
+            toast.error(error.message);
+          }
           return;
         }
         toast.success(t('auth.welcomeBack'));
@@ -91,13 +95,31 @@ const Auth = () => {
       } else {
         const { error } = await signUp(email, password, gender);
         if (error) {
-          toast.error(error.message);
+          if (error.message?.toLowerCase().includes('already')) {
+            toast.error('This email is already registered. Switch to Sign In, or use "Forgot password?" to reset it.');
+            setIsLogin(true);
+          } else {
+            toast.error(error.message);
+          }
           return;
         }
         toast.success('Account created! Please check your email to verify.');
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleClearSession = async () => {
+    try {
+      // Clear all supabase auth keys from localStorage to recover from stuck tokens
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('sb-') || k.includes('supabase'))
+        .forEach((k) => localStorage.removeItem(k));
+      toast.success('Session cleared. Try signing in again.');
+      setTimeout(() => window.location.reload(), 600);
+    } catch {
+      toast.error('Could not clear session');
     }
   };
 
@@ -251,6 +273,14 @@ const Auth = () => {
                   Forgot password?
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={handleClearSession}
+                className="w-full text-xs text-muted-foreground/70 hover:text-foreground transition-colors"
+              >
+                Having trouble signing in? Clear session & retry
+              </button>
             </form>
           )}
         </div>

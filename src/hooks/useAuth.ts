@@ -39,12 +39,24 @@ export function useAuth() {
     // INITIAL load — controls isLoading
     const initializeAuth = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Race getSession against a timeout so a stuck Navigator Lock
+        // (from corrupted/stale refresh tokens) can't freeze the UI forever.
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null } }), 4000)
+        );
+        const result: any = await Promise.race([sessionPromise, timeoutPromise]);
+        const session = result?.data?.session ?? null;
+
         if (!isMounted) return;
         setUser(session?.user ?? null);
         if (session?.user) {
           await fetchGender(session.user.id);
         }
+      } catch {
+        // If session retrieval fails (e.g. invalid refresh token), clear it.
+        try { await supabase.auth.signOut(); } catch {}
+        if (isMounted) setUser(null);
       } finally {
         if (isMounted) setIsLoading(false);
       }

@@ -8,7 +8,11 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:docker": "node scripts/check-docker.mjs",
+    "presupabase:start": "node scripts/check-docker.mjs",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
